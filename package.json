@@ -1,0 +1,23 @@
+{
+  "name": "patristic-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for patristic Bible commentaries",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "ingest": "node dist/ingest.js",
+    "ingest-writings": "node dist/ingest-writings.js",
+    "start": "node dist/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.3.5",
+    "better-sqlite3": "^12.6.2",
+    "typescript": "^5.9.3"
+  }
+}
