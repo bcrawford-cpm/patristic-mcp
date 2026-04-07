@@ -7,7 +7,7 @@ import type Database from "better-sqlite3";
 const REPO_PATH = process.env.WRITINGS_DATA_PATH ?? path.resolve(process.cwd(), "writings-data");
 
 const SKIP_DIRS = new Set([".", "..", ".git"]);
-const SKIP_FILES = new Set(["metadata.toml", "menu.html", "highlight.js"]);
+const SKIP_FILES = new Set(["metadata.toml"]);
 
 interface AuthorMeta {
   default_year?: number;

@@ -30,11 +30,14 @@ interface WritingsWorkRow {
   section_count: number;
 }
 
-function truncate(text: string, maxLen: number): string {
-  if (text.length <= maxLen) {
-    return text;
+function truncate(text: string, startPos: number, maxLen: number): string {
+  const start = Math.max(0, startPos);
+  const chunk = text.slice(start, start + maxLen);
+  
+  if (start + maxLen >= text.length) {
+    return chunk;
   }
-  return text.slice(0, maxLen) + "...";
+  return chunk + `\n\n... (text omitted, continue reading by passing start_position: ${start + maxLen})`;
 }
 
 function writingsErrorResponse(prefix: string, err: unknown): { content: Array<{ type: "text"; text: string }> } {
@@ -172,9 +175,10 @@ export function registerWritingsTools(server: McpServer): void {
       work_id: z.number().optional().describe("Work ID (from patristic_writings_by_author). Lists sections if no section specified."),
       section_id: z.number().optional().describe("Section ID (from search results). Reads that specific section."),
       section_number: z.number().optional().describe("Section number within a work (use with work_id)"),
+      start_position: z.number().optional().default(0).describe("Character offset to start reading from (for chunking long texts)"),
       max_length: z.number().optional().default(8000).describe("Max characters to return (default 8000)"),
     },
-    async ({ work_id, section_id, section_number, max_length }) => {
+    async ({ work_id, section_id, section_number, start_position, max_length }) => {
       const d = ensureWritingsDb();
 
       if (section_id) {
@@ -204,7 +208,7 @@ export function registerWritingsTools(server: McpServer): void {
         return {
           content: [{
             type: "text" as const,
-            text: `${row.author_name}${yearStr}, "${row.work_title}"${secTitle}\n\n${truncate(row.content, max_length)}`,
+            text: `${row.author_name}${yearStr}, "${row.work_title}"${secTitle}\n\n${truncate(row.content, start_position, max_length)}`,
           }],
         };
       }
@@ -248,7 +252,7 @@ export function registerWritingsTools(server: McpServer): void {
         return {
           content: [{
             type: "text" as const,
-            text: `${row.author_name}${yearStr}, "${row.work_title}"${secTitle}\n\n${truncate(row.content, max_length)}`,
+            text: `${row.author_name}${yearStr}, "${row.work_title}"${secTitle}\n\n${truncate(row.content, start_position, max_length)}`,
           }],
         };
       }

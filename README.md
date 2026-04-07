@@ -12,7 +12,7 @@ An MCP (Model Context Protocol) server that exposes patristic Bible commentaries
 | `patristic_list_authors` | List all authors with commentary counts and death years |
 | `patristic_writings_search` | Full-text search across complete patristic works (treatises, letters, etc.) |
 | `patristic_writings_by_author` | List all works by a specific author |
-| `patristic_writings_read` | Read a full section of a work by section ID |
+| `patristic_writings_read` | Read a section of a work by section ID (supports `start_position` for chunking) |
 
 ## How It Works
 
@@ -118,9 +118,17 @@ WRITINGS_DATA_PATH=./writings-data node dist/ingest-writings.js
 npm start
 ```
 
+### 4. Running Tests
+
+The server includes a fast, native `node:test` suite that automatically runs isolated databases by testing environment variables `PATRISTIC_DB_PATH` and `WRITINGS_DB_PATH`.
+
+```bash
+npm test
+```
+
 ## MCP Client Configuration
 
-Run `npm run build` first, then add this to your MCP client config (e.g. Claude Desktop `claude_desktop_config.json` or LM Studio's MCP settings):
+This is a pure stdio MCP server (no browser UI required). Run `npm run build` first, then add this to your MCP client config (e.g. Claude Desktop `claude_desktop_config.json` or LM Studio's MCP settings):
 
 ```json
 {
