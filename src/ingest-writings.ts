@@ -4,7 +4,7 @@ import * as toml from "@iarna/toml";
 import { getWritingsDb, initWritingsSchema } from "./db.js";
 import type Database from "better-sqlite3";
 
-const REPO_PATH = "/tmp/writings-db";
+const REPO_PATH = process.env.WRITINGS_DATA_PATH ?? "/tmp/writings-db";
 
 const SKIP_DIRS = new Set([".", "..", ".git"]);
 const SKIP_FILES = new Set(["metadata.toml", "menu.html", "highlight.js"]);

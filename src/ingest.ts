@@ -5,7 +5,7 @@ import { getDb, initSchema } from "./db.js";
 import { parseFilenameRef } from "./verse-ref.js";
 import type Database from "better-sqlite3";
 
-const REPO_PATH = "/tmp/commentaries-db";
+const REPO_PATH = process.env.COMMENTARIES_DATA_PATH ?? "/tmp/commentaries-db";
 
 // NT and OT book directories to skip (they contain cross-references, not commentaries)
 const BOOK_DIRS = new Set([

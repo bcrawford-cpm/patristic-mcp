@@ -5,6 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
+    "create-sample-data": "node dist/create-sample-data.js",
     "ingest": "node dist/ingest.js",
     "ingest-writings": "node dist/ingest-writings.js",
     "start": "node dist/server.js"
