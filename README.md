@@ -67,7 +67,7 @@ const ILLEGAL = /[:<>"|?*]/;
 
 const lines = execFileSync("git", ["-C", REPO, "ls-tree", "-r", "--format=%(objectname) %(path)", "HEAD"], { encoding: "utf8" }).trim().split("\n");
 
-const entries = lines.map(l => { const sp = l.indexOf(" "); return { hash: l.slice(0, sp), filePath: l.slice(sp + 1) }; }).filter(e => !ILLEGAL.test(e.name));
+const entries = lines.map(l => { const sp = l.indexOf(" "); return { hash: l.slice(0, sp), filePath: l.slice(sp + 1) }; }).filter(e => !ILLEGAL.test(e.filePath));
 
 const catFile = spawn("git", ["-C", REPO, "cat-file", "--batch"], { stdio: ["pipe", "pipe", "inherit"] });
 let buf = Buffer.alloc(0);
@@ -94,6 +94,8 @@ catFile.stdout.on("end", () => {
 </details>
 
 Then ingest both datasets:
+
+If you cloned into `./commentaries-data` and `./writings-data`, the ingest scripts now use those paths by default. Re-running either ingest command rebuilds the corresponding SQLite database instead of appending duplicate rows.
 
 **PowerShell:**
 ```powershell

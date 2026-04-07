@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as toml from "@iarna/toml";
-import { getWritingsDb, initWritingsSchema } from "./db.js";
+import { getWritingsDb, initWritingsSchema, resetWritingsData } from "./db.js";
 import type Database from "better-sqlite3";
 
-const REPO_PATH = process.env.WRITINGS_DATA_PATH ?? "/tmp/writings-db";
+const REPO_PATH = process.env.WRITINGS_DATA_PATH ?? path.resolve(process.cwd(), "writings-data");
 
 const SKIP_DIRS = new Set([".", "..", ".git"]);
 const SKIP_FILES = new Set(["metadata.toml", "menu.html", "highlight.js"]);
@@ -162,6 +162,12 @@ function deriveWorkInfo(relPath: string): { workTitle: string; sectionHint: stri
 }
 
 function ingestWritings(): void {
+  if (!fs.existsSync(REPO_PATH) || !fs.statSync(REPO_PATH).isDirectory()) {
+    throw new Error(
+      `Writings data directory not found at ${REPO_PATH}. Set WRITINGS_DATA_PATH or clone Writings-Database into ./writings-data.`
+    );
+  }
+
   const db = getWritingsDb();
   initWritingsSchema(db);
 
@@ -188,6 +194,8 @@ function ingestWritings(): void {
   let skippedEmpty = 0;
 
   const insertAll = db.transaction(() => {
+    resetWritingsData(db);
+
     for (const dir of authorDirs) {
       const authorName = dir.name;
       const authorPath = path.join(REPO_PATH, authorName);
@@ -240,7 +248,8 @@ function ingestWritings(): void {
           let raw: string;
           try {
             raw = fs.readFileSync(absPath, "utf-8");
-          } catch {
+          } catch (err) {
+            console.warn(`Skipping unreadable writings file ${absPath}: ${err instanceof Error ? err.message : String(err)}`);
             continue;
           }
 

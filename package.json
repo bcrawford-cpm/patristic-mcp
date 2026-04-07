@@ -1,6 +1,6 @@
 {
   "name": "patristic-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for patristic Bible commentaries",
   "main": "dist/server.js",
   "scripts": {
@@ -8,7 +8,8 @@
     "create-sample-data": "node dist/create-sample-data.js",
     "ingest": "node dist/ingest.js",
     "ingest-writings": "node dist/ingest-writings.js",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test test/verse-ref.test.mjs test/ingest.test.mjs"
   },
   "keywords": [],
   "author": "",

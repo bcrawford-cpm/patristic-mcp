@@ -1,8 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { getDb } from "./db.js";
-import { parseVerseRef, normalizeBook } from "./verse-ref.js";
+import { findCommentariesByVerse, type CommentaryLookupRow } from "./commentary-tools.js";
+import { getDb, getWritingsDb, validateCommentariesSchema, validateWritingsSchema } from "./db.js";
+import { parseVerseRef, normalizeBook, type VerseRef } from "./verse-ref.js";
 import { registerWritingsTools } from "./writings-tools.js";
 import type Database from "better-sqlite3";
 
@@ -15,18 +16,8 @@ function ensureDb(): Database.Database {
   return db;
 }
 
-interface CommentaryRow {
-  id: number;
-  author_name: string;
-  book: string;
-  chapter: number;
-  verse_start: number;
-  verse_end: number | null;
-  quote: string;
-  source_url: string | null;
-  source_title: string | null;
-  append_to_author_name: string | null;
-  default_year: number | null;
+interface CommentaryRow extends CommentaryLookupRow {
+  highlighted?: string | null;
 }
 
 interface AuthorRow {
@@ -43,15 +34,49 @@ function formatRef(row: CommentaryRow): string {
   return `${row.book} ${row.chapter}:${verse}`;
 }
 
-function formatCommentary(row: CommentaryRow): string {
+function formatRequestedRef(ref: VerseRef): string {
+  const verse = ref.verseEnd
+    ? `${ref.verseStart}-${ref.verseEnd}`
+    : `${ref.verseStart}`;
+  return `${ref.book} ${ref.chapter}:${verse}`;
+}
+
+function formatCommentary(row: CommentaryRow, preferHighlighted = false): string {
   const authorLabel = row.append_to_author_name
     ? `${row.author_name}${row.append_to_author_name}`
     : row.author_name;
   const yearStr = row.default_year ? ` (d. ${row.default_year})` : "";
   const sourceStr = row.source_title ? `\nSource: ${row.source_title}` : "";
   const urlStr = row.source_url ? `\nURL: ${row.source_url}` : "";
+  const body = preferHighlighted && row.highlighted ? row.highlighted : row.quote;
 
-  return `--- ${authorLabel}${yearStr} on ${formatRef(row)} ---\n${row.quote}${sourceStr}${urlStr}`;
+  return `--- ${authorLabel}${yearStr} on ${formatRef(row)} ---\n${body}${sourceStr}${urlStr}`;
+}
+
+function validateDatabaseSetup(): void {
+  const commentaryDb = getDb();
+  try {
+    const missingTables = validateCommentariesSchema(commentaryDb);
+    if (missingTables.length > 0) {
+      throw new Error(
+        `Commentary database is not initialized. Missing tables: ${missingTables.join(", ")}. Run npm run ingest first.`
+      );
+    }
+  } finally {
+    commentaryDb.close();
+  }
+
+  const writingsDb = getWritingsDb();
+  try {
+    const missingTables = validateWritingsSchema(writingsDb);
+    if (missingTables.length > 0) {
+      throw new Error(
+        `Writings database is not initialized. Missing tables: ${missingTables.join(", ")}. Run npm run ingest-writings first.`
+      );
+    }
+  } finally {
+    writingsDb.close();
+  }
 }
 
 const server = new McpServer({
@@ -78,34 +103,34 @@ server.tool(
     }
 
     const d = ensureDb();
-    const rows = d.prepare(`
-      SELECT c.*, a.name as author_name, a.default_year
-      FROM commentaries c
-      JOIN authors a ON c.author_id = a.id
-      WHERE c.book = ? AND c.chapter = ?
-        AND (c.verse_start = ? OR (c.verse_start <= ? AND c.verse_end >= ?))
-      ORDER BY a.default_year ASC, a.name ASC
-      LIMIT ?
-    `).all(
-      ref.book, ref.chapter,
-      ref.verseStart, ref.verseStart, ref.verseStart,
-      limit,
-    ) as CommentaryRow[];
+    const requestedRef = formatRequestedRef(ref);
+
+    let rows: CommentaryRow[];
+    try {
+      rows = findCommentariesByVerse(d, ref, limit) as CommentaryRow[];
+    } catch (err) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Commentary lookup error: ${err instanceof Error ? err.message : String(err)}.`,
+        }],
+      };
+    }
 
     if (rows.length === 0) {
       return {
         content: [{
           type: "text" as const,
-          text: `No commentaries found for ${ref.book} ${ref.chapter}:${ref.verseStart}.`,
+          text: `No commentaries found for ${requestedRef}.`,
         }],
       };
     }
 
-    const formatted = rows.map(formatCommentary).join("\n\n");
+    const formatted = rows.map((row) => formatCommentary(row)).join("\n\n");
     return {
       content: [{
         type: "text" as const,
-        text: `Found ${rows.length} commentaries on ${ref.book} ${ref.chapter}:${ref.verseStart}:\n\n${formatted}`,
+        text: `Found ${rows.length} commentaries on ${requestedRef}:\n\n${formatted}`,
       }],
     };
   },
@@ -133,10 +158,18 @@ server.tool(
 
     if (reference) {
       const ref = parseVerseRef(reference);
-      if (ref) {
-        query += ` AND c.book = ? AND c.chapter = ? AND (c.verse_start = ? OR (c.verse_start <= ? AND c.verse_end >= ?))`;
-        params.push(ref.book, ref.chapter, ref.verseStart, ref.verseStart, ref.verseStart);
+      if (!ref) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Could not parse verse reference: "${reference}". Try format like "Romans 9:13" or "Rom 9:13".`,
+          }],
+        };
       }
+
+      const requestVerseEnd = ref.verseEnd ?? ref.verseStart;
+      query += ` AND c.book = ? AND c.chapter = ? AND c.verse_start <= ? AND COALESCE(c.verse_end, c.verse_start) >= ?`;
+      params.push(ref.book, ref.chapter, requestVerseEnd, ref.verseStart);
     } else if (book) {
       const canonical = normalizeBook(book);
       if (canonical) {
@@ -151,7 +184,17 @@ server.tool(
     query += ` ORDER BY c.book, c.chapter, c.verse_start LIMIT ?`;
     params.push(limit);
 
-    const rows = d.prepare(query).all(...params) as CommentaryRow[];
+    let rows: CommentaryRow[];
+    try {
+      rows = d.prepare(query).all(...params) as CommentaryRow[];
+    } catch (err) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Author lookup error: ${err instanceof Error ? err.message : String(err)}.`,
+        }],
+      };
+    }
 
     if (rows.length === 0) {
       return {
@@ -162,7 +205,7 @@ server.tool(
       };
     }
 
-    const formatted = rows.map(formatCommentary).join("\n\n");
+    const formatted = rows.map((row) => formatCommentary(row)).join("\n\n");
     return {
       content: [{
         type: "text" as const,
@@ -234,7 +277,7 @@ server.tool(
       };
     }
 
-    const formatted = rows.map(formatCommentary).join("\n\n");
+    const formatted = rows.map((row) => formatCommentary(row, true)).join("\n\n");
     return {
       content: [{
         type: "text" as const,
@@ -276,7 +319,17 @@ server.tool(
     };
     query += ` ORDER BY ${orderMap[sort_by ?? "name"]}`;
 
-    const rows = d.prepare(query).all(...params) as AuthorRow[];
+    let rows: AuthorRow[];
+    try {
+      rows = d.prepare(query).all(...params) as AuthorRow[];
+    } catch (err) {
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Author list error: ${err instanceof Error ? err.message : String(err)}.`,
+        }],
+      };
+    }
 
     const lines = rows.map((r) => {
       const year = r.default_year ? ` (d. ${r.default_year})` : "";
@@ -295,6 +348,7 @@ server.tool(
 registerWritingsTools(server);
 
 async function main(): Promise<void> {
+  validateDatabaseSetup();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

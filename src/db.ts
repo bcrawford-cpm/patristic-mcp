@@ -1,8 +1,30 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 
-const DB_PATH = path.join(__dirname, "..", "patristic.db");
-const WRITINGS_DB_PATH = path.join(__dirname, "..", "writings.db");
+function resolveDbPath(envVarName: string, fallbackFilename: string): string {
+  const configuredPath = process.env[envVarName];
+  if (!configuredPath) {
+    return path.join(__dirname, "..", fallbackFilename);
+  }
+
+  return path.isAbsolute(configuredPath)
+    ? configuredPath
+    : path.resolve(process.cwd(), configuredPath);
+}
+
+const DB_PATH = resolveDbPath("PATRISTIC_DB_PATH", "patristic.db");
+const WRITINGS_DB_PATH = resolveDbPath("WRITINGS_DB_PATH", "writings.db");
+
+function findMissingTables(db: Database.Database, requiredTables: string[]): string[] {
+  const rows = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type IN ('table', 'view')
+  `).all() as Array<{ name: string }>;
+
+  const existing = new Set(rows.map((row) => row.name));
+  return requiredTables.filter((tableName) => !existing.has(tableName));
+}
 
 export function getDb(): Database.Database {
   const db = new Database(DB_PATH);
@@ -16,6 +38,29 @@ export function getWritingsDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   return db;
+}
+
+export function validateCommentariesSchema(db: Database.Database): string[] {
+  return findMissingTables(db, ["authors", "commentaries", "commentaries_fts"]);
+}
+
+export function validateWritingsSchema(db: Database.Database): string[] {
+  return findMissingTables(db, ["authors", "works", "sections", "writings_fts"]);
+}
+
+export function resetCommentariesData(db: Database.Database): void {
+  db.exec(`
+    DELETE FROM commentaries;
+    DELETE FROM authors;
+  `);
+}
+
+export function resetWritingsData(db: Database.Database): void {
+  db.exec(`
+    DELETE FROM sections;
+    DELETE FROM works;
+    DELETE FROM authors;
+  `);
 }
 
 export function initSchema(db: Database.Database): void {

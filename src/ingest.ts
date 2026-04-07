@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as toml from "@iarna/toml";
-import { getDb, initSchema } from "./db.js";
+import { getDb, initSchema, resetCommentariesData } from "./db.js";
 import { parseFilenameRef } from "./verse-ref.js";
 import type Database from "better-sqlite3";
 
-const REPO_PATH = process.env.COMMENTARIES_DATA_PATH ?? "/tmp/commentaries-db";
+const REPO_PATH = process.env.COMMENTARIES_DATA_PATH ?? path.resolve(process.cwd(), "commentaries-data");
 
 // NT and OT book directories to skip (they contain cross-references, not commentaries)
 const BOOK_DIRS = new Set([
@@ -42,6 +42,12 @@ function loadMetadata(authorDir: string): { default_year?: number; wiki?: string
 }
 
 function ingest(): void {
+  if (!fs.existsSync(REPO_PATH) || !fs.statSync(REPO_PATH).isDirectory()) {
+    throw new Error(
+      `Commentaries data directory not found at ${REPO_PATH}. Set COMMENTARIES_DATA_PATH or clone Commentaries-Database into ./commentaries-data.`
+    );
+  }
+
   const db = getDb();
   initSchema(db);
 
@@ -64,13 +70,18 @@ function ingest(): void {
   let skippedFiles = 0;
 
   const insertMany = db.transaction(() => {
+    resetCommentariesData(db);
+
     for (const dir of authorDirs) {
       const authorName = dir.name;
       const authorPath = path.join(REPO_PATH, authorName);
       const meta = loadMetadata(authorPath);
 
       insertAuthor.run(authorName, meta.default_year ?? null, meta.wiki ?? null);
-      const authorRow = getAuthorId.get(authorName) as { id: number };
+      const authorRow = getAuthorId.get(authorName) as { id: number } | undefined;
+      if (!authorRow) {
+        throw new Error(`Failed to create or fetch author row for ${authorName}.`);
+      }
       const authorId = authorRow.id;
 
       const files = fs.readdirSync(authorPath).filter(
@@ -89,7 +100,8 @@ function ingest(): void {
         let raw: string;
         try {
           raw = fs.readFileSync(filePath, "utf-8");
-        } catch {
+        } catch (err) {
+          console.warn(`Skipping unreadable commentary file ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
           skippedFiles++;
           continue;
         }
@@ -97,7 +109,8 @@ function ingest(): void {
         let parsed: TomlData;
         try {
           parsed = toml.parse(raw) as unknown as TomlData;
-        } catch {
+        } catch (err) {
+          console.warn(`Skipping invalid TOML file ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
           skippedFiles++;
           continue;
         }

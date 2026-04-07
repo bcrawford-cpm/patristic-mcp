@@ -37,6 +37,15 @@ function truncate(text: string, maxLen: number): string {
   return text.slice(0, maxLen) + "...";
 }
 
+function writingsErrorResponse(prefix: string, err: unknown): { content: Array<{ type: "text"; text: string }> } {
+  return {
+    content: [{
+      type: "text" as const,
+      text: `${prefix} error: ${err instanceof Error ? err.message : String(err)}.`,
+    }],
+  };
+}
+
 export function registerWritingsTools(server: McpServer): void {
   server.tool(
     "patristic_writings_search",
@@ -115,16 +124,21 @@ export function registerWritingsTools(server: McpServer): void {
     async ({ author }) => {
       const d = ensureWritingsDb();
 
-      const rows = d.prepare(`
-        SELECT w.id as work_id, w.title, a.name as author_name, a.death_year,
-               COUNT(s.id) as section_count
-        FROM works w
-        JOIN authors a ON w.author_id = a.id
-        LEFT JOIN sections s ON s.work_id = w.id
-        WHERE a.name LIKE ?
-        GROUP BY w.id
-        ORDER BY w.title
-      `).all(`%${author}%`) as WritingsWorkRow[];
+      let rows: WritingsWorkRow[];
+      try {
+        rows = d.prepare(`
+          SELECT w.id as work_id, w.title, a.name as author_name, a.death_year,
+                 COUNT(s.id) as section_count
+          FROM works w
+          JOIN authors a ON w.author_id = a.id
+          LEFT JOIN sections s ON s.work_id = w.id
+          WHERE a.name LIKE ?
+          GROUP BY w.id
+          ORDER BY w.title
+        `).all(`%${author}%`) as WritingsWorkRow[];
+      } catch (err) {
+        return writingsErrorResponse("Works lookup", err);
+      }
 
       if (rows.length === 0) {
         return {
@@ -164,14 +178,19 @@ export function registerWritingsTools(server: McpServer): void {
       const d = ensureWritingsDb();
 
       if (section_id) {
-        const row = d.prepare(`
-          SELECT s.id, s.section_title, s.section_number, s.content,
-                 w.title as work_title, a.name as author_name, a.death_year
-          FROM sections s
-          JOIN works w ON s.work_id = w.id
-          JOIN authors a ON w.author_id = a.id
-          WHERE s.id = ?
-        `).get(section_id) as (WritingsSearchRow & { work_title: string }) | undefined;
+        let row: (WritingsSearchRow & { work_title: string }) | undefined;
+        try {
+          row = d.prepare(`
+            SELECT s.id, s.section_title, s.section_number, s.content,
+                   w.title as work_title, a.name as author_name, a.death_year
+            FROM sections s
+            JOIN works w ON s.work_id = w.id
+            JOIN authors a ON w.author_id = a.id
+            WHERE s.id = ?
+          `).get(section_id) as (WritingsSearchRow & { work_title: string }) | undefined;
+        } catch (err) {
+          return writingsErrorResponse("Section lookup", err);
+        }
 
         if (!row) {
           return {
@@ -200,14 +219,19 @@ export function registerWritingsTools(server: McpServer): void {
       }
 
       if (section_number !== undefined) {
-        const row = d.prepare(`
-          SELECT s.id, s.section_title, s.section_number, s.content,
-                 w.title as work_title, a.name as author_name, a.death_year
-          FROM sections s
-          JOIN works w ON s.work_id = w.id
-          JOIN authors a ON w.author_id = a.id
-          WHERE s.work_id = ? AND s.section_number = ?
-        `).get(work_id, section_number) as (WritingsSearchRow & { work_title: string }) | undefined;
+        let row: (WritingsSearchRow & { work_title: string }) | undefined;
+        try {
+          row = d.prepare(`
+            SELECT s.id, s.section_title, s.section_number, s.content,
+                   w.title as work_title, a.name as author_name, a.death_year
+            FROM sections s
+            JOIN works w ON s.work_id = w.id
+            JOIN authors a ON w.author_id = a.id
+            WHERE s.work_id = ? AND s.section_number = ?
+          `).get(work_id, section_number) as (WritingsSearchRow & { work_title: string }) | undefined;
+        } catch (err) {
+          return writingsErrorResponse("Section lookup", err);
+        }
 
         if (!row) {
           return {
@@ -230,13 +254,18 @@ export function registerWritingsTools(server: McpServer): void {
       }
 
       // List sections for the work
-      const sections = d.prepare(`
-        SELECT s.id, s.section_title, s.section_number,
-               LENGTH(s.content) as content_length
-        FROM sections s
-        WHERE s.work_id = ?
-        ORDER BY s.section_number
-      `).all(work_id) as Array<{ id: number; section_title: string; section_number: number; content_length: number }>;
+      let sections: Array<{ id: number; section_title: string; section_number: number; content_length: number }>;
+      try {
+        sections = d.prepare(`
+          SELECT s.id, s.section_title, s.section_number,
+                 LENGTH(s.content) as content_length
+          FROM sections s
+          WHERE s.work_id = ?
+          ORDER BY s.section_number
+        `).all(work_id) as Array<{ id: number; section_title: string; section_number: number; content_length: number }>;
+      } catch (err) {
+        return writingsErrorResponse("Work sections lookup", err);
+      }
 
       if (sections.length === 0) {
         return {
@@ -244,11 +273,16 @@ export function registerWritingsTools(server: McpServer): void {
         };
       }
 
-      const workInfo = d.prepare(`
-        SELECT w.title, a.name as author_name, a.death_year
-        FROM works w JOIN authors a ON w.author_id = a.id
-        WHERE w.id = ?
-      `).get(work_id) as { title: string; author_name: string; death_year: number | null } | undefined;
+      let workInfo: { title: string; author_name: string; death_year: number | null } | undefined;
+      try {
+        workInfo = d.prepare(`
+          SELECT w.title, a.name as author_name, a.death_year
+          FROM works w JOIN authors a ON w.author_id = a.id
+          WHERE w.id = ?
+        `).get(work_id) as { title: string; author_name: string; death_year: number | null } | undefined;
+      } catch (err) {
+        return writingsErrorResponse("Work lookup", err);
+      }
 
       const header = workInfo
         ? `${workInfo.author_name}${workInfo.death_year ? ` (d. ${workInfo.death_year})` : ""}, "${workInfo.title}"`
